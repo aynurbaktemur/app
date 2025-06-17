@@ -3,27 +3,30 @@ import joblib
 import numpy as np
 import cv2
 from skimage.feature import hog
-import os
 
-# Flask uygulaması
 app = Flask(__name__)
 
-# Model ve seçilmiş özellikleri yükle
-MODEL_PATH = "pso_model.pkl"  # en iyi modelinizin adını buraya yazın
-FEATURES_PATH = "pso_features.npy"
+# MODELİ YÜKLE
+MODEL_PATH = "complete_pso_model.pkl"  # Model dosya adı burada
+model_data = joblib.load(MODEL_PATH)
 
-model = joblib.load(MODEL_PATH)
-selected_features = np.load(FEATURES_PATH)
+model = model_data["model"]
+scaler = model_data["scaler"]
+selected_features = model_data["selected_features"]
+hog_params = model_data["hog_params"]
 
-# HOG özelliği çıkarma fonksiyonu
+# HOG çıkarım fonksiyonu (modeldekiyle birebir aynı olmalı!)
 def extract_hog_features(img):
-    hog_features = hog(img, orientations=8, pixels_per_cell=(16, 16),
-                       cells_per_block=(1, 1), block_norm='L2-Hys')
-    return hog_features
+    return hog(img,
+               orientations=hog_params["orientations"],
+               pixels_per_cell=hog_params["pixels_per_cell"],
+               cells_per_block=hog_params["cells_per_block"],
+               transform_sqrt=hog_params["transform_sqrt"],
+               block_norm=hog_params["block_norm"],
+               feature_vector=True)
 
-# Görüntüyü işle
+# Görüntüyü oku ve işleyip özellik çıkar
 def process_image(file_storage):
-    # Görüntüyü oku ve griye çevir
     file_bytes = file_storage.read()
     img_array = np.frombuffer(file_bytes, np.uint8)
     img = cv2.imdecode(img_array, cv2.IMREAD_GRAYSCALE)
@@ -31,20 +34,23 @@ def process_image(file_storage):
     if img is None:
         return None, "Görüntü okunamadı"
 
-    # Boyutlandır
-    img = cv2.resize(img, (128, 128))
-    
-    # Özellikleri çıkar
+    img = cv2.resize(img, model_data["metadata"]["input_shape"])
+
+    # HOG çıkar
     features = extract_hog_features(img)
-    selected = features[selected_features]
 
-    return selected.reshape(1, -1), None
+    # Ölçekle ve seçilen özellikleri uygula
+    features_scaled = scaler.transform([features])
+    selected = features_scaled[:, selected_features]
 
-@app.route('/')  # 👈 Kök dizin için route ekleyin
+    return selected, None
+
+# Ana kontrol endpointi
+@app.route('/')
 def home():
     return "API çalışıyor!"
 
-# Ana API endpoint
+# Tahmin endpointi
 @app.route('/predict', methods=['POST'])
 def predict():
     if 'image' not in request.files:
@@ -56,20 +62,19 @@ def predict():
     if error:
         return jsonify({'error': error}), 400
 
-    # Tahmin
     prediction = model.predict(features)[0]
-    probability = model.predict_proba(features)[0][1]  # hasarlı olma olasılığı
+    probability = model.predict_proba(features)[0][1]
 
     return jsonify({
-        'tahmin': 'Hasarlı' if prediction == 1 else 'Hasarsız',
+        'tahmin': model_data['metadata']['class_names'][prediction],
         'hasar_orani': round(float(probability) * 100, 2)
     })
-    
-@app.route('/health',methods=["GET"]) #bu kısmı kod bloğunda ekle
 
+# Sağlık kontrolü
+@app.route('/health', methods=["GET"])
 def get_health():
+    return {"status": "running"}
 
-    return {"status":"running"}
-    
+# Uygulama başlat
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=10000)
