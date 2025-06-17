@@ -1,9 +1,10 @@
-opencv-python
+flask
+gunicorn
+opencv-python-headless
 numpy
 scikit-image
 scikit-learn
 joblib
-mealpy
 kagglehub
-gunicorn
-flask
+mealpy
+imbalanced-learn
